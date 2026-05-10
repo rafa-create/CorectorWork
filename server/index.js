@@ -299,10 +299,8 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
 });
 
 async function start() {
-  app.locals.spellPromise = withTimeout(loadFrenchSpell(), 10000).catch((error) => {
-    console.warn("Correction orthographique indisponible:", error.message);
-    return null;
-  });
+  // Disable eager spell initialization in production to avoid blocking startup.
+  app.locals.spellPromise = Promise.resolve(null);
 
   app.listen(PORT, () => {
     console.log(`API Corector démarrée sur http://localhost:${PORT}`);
