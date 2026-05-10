@@ -5,7 +5,6 @@ const cors = require("cors");
 const multer = require("multer");
 const { createWorker } = require("tesseract.js");
 const NSpell = require("nspell");
-require("dotenv").config();
 
 const PORT = Number(process.env.PORT || 4000);
 const UPLOADS_DIR = path.join(__dirname, "uploads");
