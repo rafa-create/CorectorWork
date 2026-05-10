@@ -81,6 +81,24 @@ function fixCase(sourceWord, candidate) {
   return candidate;
 }
 
+function withTimeout(promise, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timeout spell init after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 async function runOcr(imagePath) {
   const worker = await createWorker("fra");
   try {
@@ -227,7 +245,14 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
   try {
     const rawText = await runOcr(imagePath);
     const spell = await app.locals.spellPromise;
-    const orthography = correctOrthography(rawText, spell);
+    const orthography = spell
+      ? correctOrthography(rawText, spell)
+      : {
+          correctedText: rawText,
+          mistakes: 0,
+          orthographyScore: 20,
+          suggestions: [],
+        };
 
     const criteria = {
       orthographe: {
@@ -271,8 +296,10 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
 });
 
 async function start() {
-  app.locals.spellPromise = loadFrenchSpell();
-  await app.locals.spellPromise;
+  app.locals.spellPromise = withTimeout(loadFrenchSpell(), 10000).catch((error) => {
+    console.warn("Correction orthographique indisponible:", error.message);
+    return null;
+  });
 
   app.listen(PORT, () => {
     console.log(`API Corector démarrée sur http://localhost:${PORT}`);
