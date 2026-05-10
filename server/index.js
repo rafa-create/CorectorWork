@@ -64,8 +64,10 @@ function nowIso() {
 }
 
 async function loadFrenchSpell() {
-  const dictionaryModule = await import("dictionary-fr");
-  return new NSpell(dictionaryModule.default);
+  const dictionaryDir = path.dirname(require.resolve("dictionary-fr"));
+  const aff = fs.readFileSync(path.join(dictionaryDir, "index.aff"));
+  const dic = fs.readFileSync(path.join(dictionaryDir, "index.dic"));
+  return new NSpell({ aff, dic });
 }
 
 function fixCase(sourceWord, candidate) {
