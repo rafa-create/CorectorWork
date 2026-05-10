@@ -3,42 +3,43 @@ const fs = require("fs");
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
-const Database = require("better-sqlite3");
 const { createWorker } = require("tesseract.js");
 const NSpell = require("nspell");
 require("dotenv").config();
 
 const PORT = Number(process.env.PORT || 4000);
-const DB_PATH = path.join(__dirname, "data", "corector.db");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+const DATA_PATH = path.join(__dirname, "data", "store.json");
+fs.mkdirSync(path.dirname(DATA_PATH), { recursive: true });
 
-const db = new Database(DB_PATH);
+function loadStore() {
+  if (!fs.existsSync(DATA_PATH)) {
+    return {
+      nextStudentId: 1,
+      nextSubmissionId: 1,
+      students: [],
+      submissions: [],
+    };
+  }
+  try {
+    return JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
+  } catch {
+    return {
+      nextStudentId: 1,
+      nextSubmissionId: 1,
+      students: [],
+      submissions: [],
+    };
+  }
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    class_name TEXT,
-    created_at TEXT NOT NULL
-  );
+function saveStore(store) {
+  fs.writeFileSync(DATA_PATH, JSON.stringify(store, null, 2), "utf8");
+}
 
-  CREATE TABLE IF NOT EXISTS submissions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id INTEGER NOT NULL,
-    title TEXT,
-    image_path TEXT NOT NULL,
-    text_raw TEXT NOT NULL,
-    text_corrected TEXT NOT NULL,
-    mistakes_count INTEGER NOT NULL,
-    score_orthography REAL NOT NULL,
-    criteria_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (student_id) REFERENCES students(id)
-  );
-`);
+const store = loadStore();
 
 const app = express();
 app.use(cors());
@@ -144,18 +145,24 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.get("/api/students", (_req, res) => {
-  const students = db
-    .prepare(
-      `SELECT s.*,
-        (
-          SELECT ROUND(AVG(score_orthography), 2)
-          FROM submissions sub
-          WHERE sub.student_id = s.id
-        ) AS average_orthography
-      FROM students s
-      ORDER BY s.name ASC`
-    )
-    .all();
+  const students = store.students
+    .map((student) => {
+      const studentSubs = store.submissions.filter((submission) => submission.student_id === student.id);
+      const average =
+        studentSubs.length > 0
+          ? Number(
+              (
+                studentSubs.reduce((sum, item) => sum + Number(item.score_orthography || 0), 0) /
+                studentSubs.length
+              ).toFixed(2)
+            )
+          : null;
+      return {
+        ...student,
+        average_orthography: average,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "fr"));
   res.json(students);
 });
 
@@ -168,11 +175,14 @@ app.post("/api/students", (req, res) => {
     return;
   }
 
-  const insert = db
-    .prepare("INSERT INTO students (name, class_name, created_at) VALUES (?, ?, ?)")
-    .run(name, className || null, nowIso());
-
-  const created = db.prepare("SELECT * FROM students WHERE id = ?").get(insert.lastInsertRowid);
+  const created = {
+    id: store.nextStudentId++,
+    name,
+    class_name: className || null,
+    created_at: nowIso(),
+  };
+  store.students.push(created);
+  saveStore(store);
   res.status(201).json(created);
 });
 
@@ -183,18 +193,18 @@ app.get("/api/students/:id/submissions", (req, res) => {
     return;
   }
 
-  const student = db.prepare("SELECT * FROM students WHERE id = ?").get(studentId);
+  const student = store.students.find((item) => item.id === studentId);
   if (!student) {
     res.status(404).json({ error: "Élève introuvable." });
     return;
   }
 
-  const submissions = db
-    .prepare("SELECT * FROM submissions WHERE student_id = ? ORDER BY datetime(created_at) DESC")
-    .all(studentId)
+  const submissions = store.submissions
+    .filter((item) => item.student_id === studentId)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     .map((item) => ({
       ...item,
-      criteria: JSON.parse(item.criteria_json),
+      criteria: item.criteria,
     }));
 
   res.json({ student, submissions });
@@ -207,7 +217,7 @@ app.get("/api/submissions/:id", (req, res) => {
     return;
   }
 
-  const submission = db.prepare("SELECT * FROM submissions WHERE id = ?").get(submissionId);
+  const submission = store.submissions.find((item) => item.id === submissionId);
   if (!submission) {
     res.status(404).json({ error: "Copie introuvable." });
     return;
@@ -215,7 +225,7 @@ app.get("/api/submissions/:id", (req, res) => {
 
   res.json({
     ...submission,
-    criteria: JSON.parse(submission.criteria_json),
+    criteria: submission.criteria,
   });
 });
 
@@ -229,7 +239,7 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
     return;
   }
 
-  const student = db.prepare("SELECT * FROM students WHERE id = ?").get(studentId);
+  const student = store.students.find((item) => item.id === studentId);
   if (!student) {
     res.status(404).json({ error: "Élève introuvable." });
     return;
@@ -260,26 +270,21 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
       },
     };
 
-    const createdAt = nowIso();
-    const insert = db
-      .prepare(
-        `INSERT INTO submissions
-          (student_id, title, image_path, text_raw, text_corrected, mistakes_count, score_orthography, criteria_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        studentId,
-        title || "Copie sans titre",
-        image.filename,
-        rawText,
-        orthography.correctedText,
-        orthography.mistakes,
-        orthography.orthographyScore,
-        JSON.stringify(criteria),
-        createdAt
-      );
+    const created = {
+      id: store.nextSubmissionId++,
+      student_id: studentId,
+      title: title || "Copie sans titre",
+      image_path: image.filename,
+      text_raw: rawText,
+      text_corrected: orthography.correctedText,
+      mistakes_count: orthography.mistakes,
+      score_orthography: orthography.orthographyScore,
+      criteria,
+      created_at: nowIso(),
+    };
 
-    const created = db.prepare("SELECT * FROM submissions WHERE id = ?").get(insert.lastInsertRowid);
+    store.submissions.push(created);
+    saveStore(store);
     res.status(201).json({
       ...created,
       criteria,
