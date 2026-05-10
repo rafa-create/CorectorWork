@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
 function scoreClass(score) {
   if (score >= 15) return "good";
@@ -31,7 +31,7 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const { data } = await axios.get(`${API_URL}/api/students`);
+      const { data } = await axios.get(`${API_BASE}/students`);
       setStudents(data);
       if (!selectedStudentId && data.length > 0) {
         setSelectedStudentId(data[0].id);
@@ -49,7 +49,7 @@ function App() {
       setLoading(true);
       setError("");
       try {
-        const { data } = await axios.get(`${API_URL}/api/students`);
+        const { data } = await axios.get(`${API_BASE}/students`);
         if (!active) return;
         setStudents(data);
         if (data.length > 0) {
@@ -79,7 +79,7 @@ function App() {
       setDetailsLoading(true);
       setError("");
       try {
-        const { data } = await axios.get(`${API_URL}/api/students/${selectedStudentId}/submissions`);
+        const { data } = await axios.get(`${API_BASE}/students/${selectedStudentId}/submissions`);
         if (!active) return;
         setSubmissions(data.submissions);
         setSelectedSubmission(data.submissions[0] || null);
@@ -108,7 +108,7 @@ function App() {
 
     setError("");
     try {
-      await axios.post(`${API_URL}/api/students`, {
+      await axios.post(`${API_BASE}/students`, {
         name,
         className: newStudentClass.trim(),
       });
