@@ -1,0 +1,8 @@
+**/node_modules/
+**/.expo/
+**/dist/
+**/.DS_Store
+**/.env
+server/data/
+server/uploads/
+github.com/

@@ -1,0 +1,134 @@
+.layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+header h1 {
+  margin-bottom: 8px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #d7dde6;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+
+.student-form {
+  display: grid;
+  gap: 10px;
+}
+
+input,
+select,
+button {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #b9c4d3;
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: #23458f;
+  color: #fff;
+  border: none;
+}
+
+.student-list {
+  display: grid;
+  gap: 8px;
+}
+
+.student {
+  text-align: left;
+  background: #f7f8fb;
+  color: #223;
+  display: grid;
+  gap: 2px;
+}
+
+.student.active {
+  outline: 2px solid #23458f;
+}
+
+.badge {
+  display: inline-block;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.good {
+  background: #dff7e4;
+}
+
+.medium {
+  background: #fff4d7;
+}
+
+.low {
+  background: #ffdfe0;
+}
+
+.timeline {
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 52px;
+  align-items: center;
+  gap: 8px;
+}
+
+.bar-wrapper {
+  width: 100%;
+  background: #ecf0f5;
+  border-radius: 999px;
+  height: 14px;
+}
+
+.bar {
+  height: 14px;
+  border-radius: 999px;
+}
+
+.bar.good {
+  background: #3fa35d;
+}
+
+.bar.medium {
+  background: #d6a418;
+}
+
+.bar.low {
+  background: #c44d56;
+}
+
+.submission-detail pre {
+  white-space: pre-wrap;
+  background: #f5f7fb;
+  border: 1px solid #d9e0eb;
+  border-radius: 8px;
+  padding: 10px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.error {
+  margin-top: 12px;
+  color: #9f2020;
+  font-weight: 600;
+}
