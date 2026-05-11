@@ -91,6 +91,13 @@ function fixCase(sourceWord, candidate) {
   return candidate;
 }
 
+function normalizeWordForCompare(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
 function withTimeout(promise, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -203,8 +210,21 @@ function correctOrthography(rawText, spell) {
       return word;
     }
 
-    mistakes += 1;
     const correctedWord = fixCase(word, proposed);
+    const normalizedOriginal = normalizeWordForCompare(word);
+    const normalizedCorrected = normalizeWordForCompare(correctedWord);
+
+    // Ignore no-op corrections (ex: "Gauguin" -> "Gauguin").
+    if (!normalizedCorrected || normalizedOriginal === normalizedCorrected) {
+      return word;
+    }
+
+    // Keep proper names untouched to avoid false positives (ex: "Taratonga" -> "Maratona").
+    if (/^[A-ZÀ-ÖØ-Ý][\p{L}’-]+$/u.test(word)) {
+      return word;
+    }
+
+    mistakes += 1;
     suggestions.push({ original: word, corrected: correctedWord });
     return correctedWord;
   });
@@ -267,6 +287,39 @@ app.post("/api/students", (req, res) => {
   store.students.push(created);
   saveStore(store);
   res.status(201).json(created);
+});
+
+app.delete("/api/students/:id", (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) {
+    res.status(400).json({ error: "Identifiant d'élève invalide." });
+    return;
+  }
+
+  const studentIndex = store.students.findIndex((item) => item.id === studentId);
+  if (studentIndex < 0) {
+    res.status(404).json({ error: "Élève introuvable." });
+    return;
+  }
+
+  const removedStudent = store.students[studentIndex];
+  store.students.splice(studentIndex, 1);
+
+  const removedSubmissions = store.submissions.filter((item) => item.student_id === studentId);
+  for (const submission of removedSubmissions) {
+    if (submission?.image_path) {
+      const uploadPath = path.join(UPLOAD_DIR, submission.image_path);
+      deleteUploadedImage(uploadPath);
+    }
+  }
+  store.submissions = store.submissions.filter((item) => item.student_id !== studentId);
+
+  saveStore(store);
+  res.json({
+    ok: true,
+    removed_student_id: removedStudent.id,
+    removed_submissions: removedSubmissions.length,
+  });
 });
 
 app.get("/api/students/:id/submissions", (req, res) => {

@@ -78,6 +78,14 @@ function renderHighlightedPre(text, words, highlightClassName) {
   );
 }
 
+function getFirstStudentIdForClass(students, classFilter) {
+  const visibleStudents =
+    classFilter === "__ALL__"
+      ? students
+      : students.filter((student) => (student.class_name || "Sans classe") === classFilter);
+  return visibleStudents[0]?.id ?? null;
+}
+
 function App() {
   const [students, setStudents] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState(null);
@@ -91,6 +99,10 @@ function App() {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [uploadFeedback, setUploadFeedback] = useState("");
+  const [uploadStartedAt, setUploadStartedAt] = useState(null);
+  const [processingStartedAt, setProcessingStartedAt] = useState(null);
+  const [uploadElapsedSec, setUploadElapsedSec] = useState(0);
+  const [processingElapsedSec, setProcessingElapsedSec] = useState(0);
 
   const [newStudentName, setNewStudentName] = useState("");
   const [newStudentClass, setNewStudentClass] = useState("");
@@ -120,17 +132,34 @@ function App() {
     return students.filter((student) => (student.class_name || "Sans classe") === selectedClass);
   }, [students, selectedClass]);
 
+  useEffect(() => {
+    if (!uploading) return;
+
+    const tick = () => {
+      const now = Date.now();
+      if (uploadStartedAt) {
+        setUploadElapsedSec(Math.max(0, Math.floor((now - uploadStartedAt) / 1000)));
+      }
+      if (processingStartedAt) {
+        setProcessingElapsedSec(Math.max(0, Math.floor((now - processingStartedAt) / 1000)));
+      }
+    };
+
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [uploading, uploadStartedAt, processingStartedAt]);
+
   async function loadStudents() {
     setLoading(true);
     setError("");
     try {
       const { data } = await axios.get(`${API_BASE}/students`);
       setStudents(data);
-      if (data.length > 0) {
-        setSelectedStudentId((current) => current ?? data[0].id);
-      } else {
-        setSelectedStudentId(null);
-      }
+      setSelectedStudentId((current) => {
+        if (current && data.some((student) => student.id === current)) return current;
+        return getFirstStudentIdForClass(data, selectedClass);
+      });
     } catch {
       setError("Impossible de charger les élèves.");
     } finally {
@@ -147,11 +176,10 @@ function App() {
         const { data } = await axios.get(`${API_BASE}/students`);
         if (!active) return;
         setStudents(data);
-        if (data.length > 0) {
-          setSelectedStudentId((current) => current ?? data[0].id);
-        } else {
-          setSelectedStudentId(null);
-        }
+        setSelectedStudentId((current) => {
+          if (current && data.some((student) => student.id === current)) return current;
+          return data[0]?.id ?? null;
+        });
       } catch {
         if (active) {
           setError("Impossible de charger les élèves.");
@@ -222,6 +250,25 @@ function App() {
     }
   }
 
+  async function handleDeleteSelectedStudent() {
+    if (!selectedStudent) return;
+    const shouldDelete = window.confirm(
+      `Supprimer l'élève ${selectedStudent.name} et toutes ses copies ? Cette action est définitive.`
+    );
+    if (!shouldDelete) return;
+
+    setError("");
+    try {
+      await axios.delete(`${API_BASE}/students/${selectedStudent.id}`);
+      setSelectedSubmission(null);
+      setSubmissions([]);
+      setShowEvolutionSection(false);
+      await loadStudents();
+    } catch {
+      setError("Impossible de supprimer l'élève.");
+    }
+  }
+
   async function handleUploadSubmission(event) {
     event.preventDefault();
     if (!selectedStudentId) {
@@ -236,6 +283,10 @@ function App() {
     setError("");
     setUploadFeedback("");
     setUploadProgress(0);
+    setUploadStartedAt(Date.now());
+    setProcessingStartedAt(null);
+    setUploadElapsedSec(0);
+    setProcessingElapsedSec(0);
     setUploading(true);
     try {
       const formData = new FormData();
@@ -248,6 +299,9 @@ function App() {
           if (!eventInfo?.total) return;
           const percent = Math.min(100, Math.round((eventInfo.loaded / eventInfo.total) * 100));
           setUploadProgress(percent);
+          if (percent >= 100) {
+            setProcessingStartedAt((current) => current ?? Date.now());
+          }
         },
       });
 
@@ -275,6 +329,8 @@ function App() {
     } finally {
       setUploading(false);
       setUploadProgress(null);
+      setUploadStartedAt(null);
+      setProcessingStartedAt(null);
     }
   }
 
@@ -319,6 +375,15 @@ function App() {
   }, [selectedSubmission]);
   const rawHighlightWords = spellingDetails.map((item) => item.original);
   const correctedHighlightWords = spellingDetails.map((item) => item.corrected);
+  const isUploadingToServer = uploading && Number(uploadProgress ?? 0) < 100;
+  const isProcessingServerSide = uploading && Number(uploadProgress ?? 0) >= 100;
+  const isLongProcessing = isProcessingServerSide && processingElapsedSec >= 20;
+  const transcriptionStepState = isProcessingServerSide
+    ? processingElapsedSec < 12
+      ? "active"
+      : "done"
+    : "pending";
+  const correctionStepState = isProcessingServerSide && processingElapsedSec >= 12 ? "active" : "pending";
 
   return (
     <main className="layout">
@@ -366,7 +431,15 @@ function App() {
           {students.length ? (
             <label className="stack-label">
               Classe
-              <select value={selectedClass} onChange={(event) => setSelectedClass(event.target.value)}>
+              <select
+                value={selectedClass}
+                onChange={(event) => {
+                  const nextClass = event.target.value;
+                  setSelectedClass(nextClass);
+                  setSelectedStudentId(getFirstStudentIdForClass(students, nextClass));
+                  setShowEvolutionSection(false);
+                }}
+              >
                 <option value="__ALL__">Toutes les classes</option>
                 {classOptions.map((className) => (
                   <option value={className} key={className}>
@@ -376,44 +449,46 @@ function App() {
               </select>
             </label>
           ) : null}
-          <div className="student-list">
-            {filteredStudents.map((student) => (
-              <button
-                key={student.id}
-                className={student.id === selectedStudentId ? "student active" : "student"}
-                onClick={() => setSelectedStudentId(student.id)}
-              >
-                <strong>{student.name}</strong>
-                <span>{student.class_name || "Classe non renseignée"}</span>
-                <span className={`badge ${scoreClass(student.average_orthography || 0)}`}>
-                  Moy. orthographe: {student.average_orthography ?? "-"} / 20
-                </span>
-              </button>
-            ))}
-            {!filteredStudents.length && !loading ? <p>Aucun élève pour ce filtre.</p> : null}
-          </div>
-          {selectedStudent ? (
-            <button type="button" className="secondary-btn" onClick={() => setShowEvolutionSection((value) => !value)}>
-              {showEvolutionSection ? "Masquer évolution" : "Montrer évolution"}
-            </button>
-          ) : null}
-        </article>
-
-        <article className="card">
-          <h2>Ajouter une copie</h2>
-          <form onSubmit={handleUploadSubmission} className="student-form">
+          <label className="stack-label">
+            Élève
             <select
               value={selectedStudentId ?? ""}
               onChange={(event) => setSelectedStudentId(Number(event.target.value) || null)}
-              disabled={uploading}
+              disabled={!filteredStudents.length}
             >
               <option value="">Sélectionner un élève</option>
               {filteredStudents.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.name}
+                  {student.name} - {student.class_name || "Sans classe"}
                 </option>
               ))}
             </select>
+          </label>
+          {!filteredStudents.length && !loading ? <p>Aucun élève pour ce filtre.</p> : null}
+          {selectedStudent ? (
+            <div className="student-selected-card">
+              <strong>{selectedStudent.name}</strong>
+              <span>{selectedStudent.class_name || "Classe non renseignée"}</span>
+              <span className={`badge ${scoreClass(selectedStudent.average_orthography || 0)}`}>
+                Moy. orthographe: {selectedStudent.average_orthography ?? "-"} / 20
+              </span>
+            </div>
+          ) : null}
+          {selectedStudent ? (
+            <div className="actions-row">
+              <button type="button" className="secondary-btn" onClick={() => setShowEvolutionSection((value) => !value)}>
+                {showEvolutionSection ? "Masquer évolution" : "Montrer évolution"}
+              </button>
+              <button type="button" className="danger-btn" onClick={handleDeleteSelectedStudent}>
+                Supprimer l'élève
+              </button>
+            </div>
+          ) : null}
+        </article>
+
+        <article className="card">
+          <h2>Ajouter une copie de {selectedStudent?.name || "..."}</h2>
+          <form onSubmit={handleUploadSubmission} className="student-form">
             <input
               value={uploadTitle}
               onChange={(event) => setUploadTitle(event.target.value)}
@@ -440,11 +515,21 @@ function App() {
               />
             </label>
             {uploadFile ? <p>{uploadFile.name}</p> : null}
-            {uploading && uploadProgress !== null && uploadProgress < 100 ? (
-              <p>Téléversement de la copie: {uploadProgress}%</p>
-            ) : null}
-            {uploading && (uploadProgress === null || uploadProgress >= 100) ? (
-              <p>Téléversement terminé, traitement en cours...</p>
+            {uploading ? (
+              <div className="upload-status-block">
+                <p className="upload-status-title">
+                  {isLongProcessing
+                    ? `Traitement long en cours... (${processingElapsedSec}s côté serveur)`
+                    : `Traitement en cours... (${uploadElapsedSec}s)`}
+                </p>
+                <ol className="upload-steps">
+                  <li className={isUploadingToServer ? "active" : "done"}>Téléversement de l'image</li>
+                  <li className={transcriptionStepState}>Fiabilité et transcription</li>
+                  <li className={correctionStepState}>Correction orthographique et note</li>
+                </ol>
+                {isUploadingToServer ? <p>Téléversement: {uploadProgress ?? 0}%</p> : null}
+                {isProcessingServerSide ? <p>Téléversement terminé, analyse côté serveur en cours.</p> : null}
+              </div>
             ) : null}
             <button type="submit" className="upload-submit-btn" disabled={uploading || !selectedStudentId}>
               {uploading ? "Traitement..." : "Prendre/Charger puis corriger"}
@@ -533,7 +618,7 @@ function App() {
         ) : null}
 
         <article className="card">
-          <h2>Détail de la copie</h2>
+          <h2>Détail des copies de {selectedStudent?.name || "..."}</h2>
           <select
             value={selectedSubmission?.id || ""}
             onChange={(event) => {
@@ -597,20 +682,28 @@ function App() {
                 )
               ) : null}
               <button type="button" onClick={() => setShowRawText((value) => !value)}>
-                {showRawText ? "Masquer la transcription" : "Afficher la transcription"}
+                {showRawText ? "Masquer la transcription brute (OCR)" : "Afficher la transcription brute (OCR)"}
               </button>
               {showRawText ? (
-                renderHighlightedPre(selectedSubmission.text_raw, rawHighlightWords, "text-error-highlight")
+                <>
+                  <p className="text-caption">Texte brut issu de l'OCR, avant correction orthographique.</p>
+                  {renderHighlightedPre(selectedSubmission.text_raw, rawHighlightWords, "text-error-highlight")}
+                </>
               ) : null}
               <button type="button" onClick={() => setShowCorrectedText((value) => !value)}>
-                {showCorrectedText ? "Masquer le texte corrigé" : "Afficher le texte corrigé"}
+                {showCorrectedText ? "Masquer le texte corrigé (automatique)" : "Afficher le texte corrigé (automatique)"}
               </button>
               {showCorrectedText ? (
-                renderHighlightedPre(
-                  selectedSubmission.text_corrected || "Aucune correction disponible.",
-                  correctedHighlightWords,
-                  "text-corrected-highlight"
-                )
+                <>
+                  <p className="text-caption">
+                    Correction automatique: peut être imparfaite si la transcription OCR est bruitée.
+                  </p>
+                  {renderHighlightedPre(
+                    selectedSubmission.text_corrected || "Aucune correction disponible.",
+                    correctedHighlightWords,
+                    "text-corrected-highlight"
+                  )}
+                </>
               ) : null}
             </div>
           ) : (

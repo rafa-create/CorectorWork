@@ -60,10 +60,51 @@ button {
   color: #1e2f53;
 }
 
+.danger-btn {
+  background: #b32935;
+  color: #fff;
+}
+
 .upload-submit-btn {
   width: 100%;
   max-width: 100%;
   line-height: 1.3;
+}
+
+.upload-status-block {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #d9e0eb;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 10px;
+}
+
+.upload-status-title {
+  margin: 0;
+  font-weight: 700;
+  color: #22314b;
+}
+
+.upload-steps {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.upload-steps li.done {
+  color: #1f6b3a;
+  font-weight: 600;
+}
+
+.upload-steps li.active {
+  color: #23458f;
+  font-weight: 700;
+}
+
+.upload-steps li.pending {
+  color: #6a7486;
 }
 
 @media (max-width: 640px) {
@@ -76,6 +117,16 @@ button {
 .student-list {
   display: grid;
   gap: 8px;
+}
+
+.student-selected-card {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #d9e0eb;
+  border-radius: 8px;
+  background: #f7faff;
 }
 
 .stack-label {
@@ -219,6 +270,12 @@ button {
 .submission-detail {
   display: grid;
   gap: 8px;
+}
+
+.text-caption {
+  margin: 0;
+  color: #4f5b6f;
+  font-size: 13px;
 }
 
 .note-details-block {
