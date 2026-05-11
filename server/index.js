@@ -8,6 +8,8 @@ const NSpell = require("nspell");
 
 const PORT = Number(process.env.PORT || 4000);
 const UPLOADS_DIR = path.join(__dirname, "uploads");
+const OCR_MAX_CONCURRENT = 1;
+const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 90000);
 
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 const DATA_PATH = path.join(__dirname, "data", "store.json");
@@ -60,6 +62,15 @@ const upload = multer({
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function deleteUploadedImage(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return;
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // Best effort cleanup.
+  }
 }
 
 async function loadFrenchSpell() {
@@ -118,10 +129,19 @@ async function getSpellChecker(appRef) {
 
 async function runOcr(imagePath) {
   const worker = await createWorker("fra");
+  let timeoutId = null;
   try {
-    const result = await worker.recognize(imagePath);
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        const timeoutError = new Error(`OCR timeout after ${OCR_TIMEOUT_MS}ms`);
+        timeoutError.code = "OCR_TIMEOUT";
+        reject(timeoutError);
+      }, OCR_TIMEOUT_MS);
+    });
+    const result = await Promise.race([worker.recognize(imagePath), timeoutPromise]);
     return (result.data.text || "").trim();
   } finally {
+    if (timeoutId) clearTimeout(timeoutId);
     await worker.terminate();
   }
 }
@@ -158,7 +178,11 @@ function correctOrthography(rawText, spell) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    ocr_in_progress: Number(app.locals.ocrInProgress || 0),
+    ocr_max_concurrent: OCR_MAX_CONCURRENT,
+  });
 });
 
 app.get("/api/students", (_req, res) => {
@@ -267,7 +291,17 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
     return;
   }
 
+  if (Number(app.locals.ocrInProgress || 0) >= OCR_MAX_CONCURRENT) {
+    deleteUploadedImage(image.path);
+    res.set("Retry-After", "20");
+    res.status(429).json({
+      error: "Traitement déjà en cours sur le serveur. Réessaie dans quelques instants.",
+    });
+    return;
+  }
+
   const imagePath = image.path;
+  app.locals.ocrInProgress = Number(app.locals.ocrInProgress || 0) + 1;
   try {
     const rawText = await runOcr(imagePath);
     let spell = null;
@@ -314,16 +348,24 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
       image_url: `/uploads/${created.image_path}`,
     });
   } catch (error) {
-    res.status(500).json({
-      error: "Impossible de traiter la copie.",
-      details: String(error?.message || error),
-    });
+    deleteUploadedImage(imagePath);
+    if (error?.code === "OCR_TIMEOUT") {
+      res.status(504).json({
+        error:
+          "Le traitement est trop long pour cette image. Réessaie avec une image plus nette ou plus légère.",
+      });
+      return;
+    }
+    res.status(500).json({ error: "Impossible de traiter la copie.", details: String(error?.message || error) });
+  } finally {
+    app.locals.ocrInProgress = Math.max(0, Number(app.locals.ocrInProgress || 1) - 1);
   }
 });
 
 async function start() {
   app.locals.spellPromise = null;
   app.locals.spellInstance = null;
+  app.locals.ocrInProgress = 0;
 
   app.listen(PORT, () => {
     console.log(`API Corector démarrée sur http://localhost:${PORT}`);
