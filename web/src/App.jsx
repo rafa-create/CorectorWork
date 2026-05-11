@@ -10,6 +10,21 @@ function scoreClass(score) {
   return "low";
 }
 
+function generateDefaultCopyTitle() {
+  const now = new Date();
+  const date = now.toLocaleDateString("fr-FR");
+  const time = now.toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `Copie ${date} ${time}`;
+}
+
+function getSubmissionImageUrl(submission) {
+  if (!submission?.image_path) return "";
+  return `/uploads/${submission.image_path}`;
+}
+
 function App() {
   const [students, setStudents] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState(null);
@@ -18,14 +33,37 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadTitle, setUploadTitle] = useState(() => generateDefaultCopyTitle());
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [uploadFeedback, setUploadFeedback] = useState("");
 
   const [newStudentName, setNewStudentName] = useState("");
   const [newStudentClass, setNewStudentClass] = useState("");
+  const [showNewStudentForm, setShowNewStudentForm] = useState(false);
+  const [selectedClass, setSelectedClass] = useState("__ALL__");
+  const [showRawText, setShowRawText] = useState(false);
+  const [showCorrectedText, setShowCorrectedText] = useState(false);
+  const [showCopyImage, setShowCopyImage] = useState(false);
+  const [showNoteDetails, setShowNoteDetails] = useState(false);
 
   const selectedStudent = useMemo(
     () => students.find((student) => student.id === selectedStudentId) || null,
     [students, selectedStudentId]
   );
+
+  const classOptions = useMemo(() => {
+    const values = students
+      .map((student) => student.class_name || "Sans classe")
+      .filter((value, index, array) => array.indexOf(value) === index);
+    return values.sort((a, b) => a.localeCompare(b, "fr"));
+  }, [students]);
+
+  const filteredStudents = useMemo(() => {
+    if (selectedClass === "__ALL__") return students;
+    return students.filter((student) => (student.class_name || "Sans classe") === selectedClass);
+  }, [students, selectedClass]);
 
   async function loadStudents() {
     setLoading(true);
@@ -33,8 +71,10 @@ function App() {
     try {
       const { data } = await axios.get(`${API_BASE}/students`);
       setStudents(data);
-      if (!selectedStudentId && data.length > 0) {
-        setSelectedStudentId(data[0].id);
+      if (data.length > 0) {
+        setSelectedStudentId((current) => current ?? data[0].id);
+      } else {
+        setSelectedStudentId(null);
       }
     } catch {
       setError("Impossible de charger les élèves.");
@@ -54,6 +94,8 @@ function App() {
         setStudents(data);
         if (data.length > 0) {
           setSelectedStudentId((current) => current ?? data[0].id);
+        } else {
+          setSelectedStudentId(null);
         }
       } catch {
         if (active) {
@@ -83,6 +125,10 @@ function App() {
         if (!active) return;
         setSubmissions(data.submissions);
         setSelectedSubmission(data.submissions[0] || null);
+        setShowRawText(false);
+        setShowCorrectedText(false);
+        setShowCopyImage(false);
+        setShowNoteDetails(false);
       } catch {
         if (active) {
           setError("Impossible de charger les copies de cet élève.");
@@ -114,9 +160,66 @@ function App() {
       });
       setNewStudentName("");
       setNewStudentClass("");
+      setShowNewStudentForm(false);
       await loadStudents();
     } catch {
       setError("Impossible de créer l'élève.");
+    }
+  }
+
+  async function handleUploadSubmission(event) {
+    event.preventDefault();
+    if (!selectedStudentId) {
+      setError("Sélectionner un élève avant d'ajouter une copie.");
+      return;
+    }
+    if (!uploadFile) {
+      setError("Choisir une image de copie.");
+      return;
+    }
+
+    setError("");
+    setUploadFeedback("");
+    setUploadProgress(0);
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("studentId", String(selectedStudentId));
+      formData.append("title", uploadTitle.trim() || generateDefaultCopyTitle());
+      formData.append("image", uploadFile);
+
+      const { data } = await axios.post(`${API_BASE}/submissions`, formData, {
+        onUploadProgress: (eventInfo) => {
+          if (!eventInfo?.total) return;
+          const percent = Math.min(100, Math.round((eventInfo.loaded / eventInfo.total) * 100));
+          setUploadProgress(percent);
+        },
+      });
+
+      setUploadFeedback(
+        `Copie traitée. Note orthographe ${data.score_orthography ?? "-"} /20, fautes ${
+          data.mistakes_count ?? "-"
+        }.`
+      );
+      setUploadFile(null);
+      setUploadTitle(generateDefaultCopyTitle());
+      await loadStudents();
+      const submissionsData = await axios.get(`${API_BASE}/students/${selectedStudentId}/submissions`);
+      setSubmissions(submissionsData.data.submissions);
+      setSelectedSubmission(submissionsData.data.submissions[0] || null);
+    } catch (uploadError) {
+      if (uploadError?.response?.status === 413) {
+        setError("Image trop volumineuse. Réduire la taille ou la qualité de la photo.");
+      } else if (uploadError?.response?.status === 429) {
+        setError("Traitement déjà en cours sur le serveur. Réessaie dans quelques instants.");
+      } else if (uploadError?.response?.status === 400) {
+        setError(uploadError?.response?.data?.error || "Copie invalide.");
+      } else {
+        setError("Impossible d'envoyer la copie.");
+      }
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -124,43 +227,69 @@ function App() {
     .slice()
     .reverse()
     .map((submission, index) => ({
+      id: submission.id,
       label: `Copie ${index + 1}`,
-      score: submission.score_orthography,
+      score: Number(submission.score_orthography || 0),
     }));
 
   return (
     <main className="layout">
       <header>
-        <h1>Suivi des copies - Orthographe</h1>
-        <p>
-          Version web pour visualiser la transcription, la correction orthographique et
-          l'évolution de chaque élève.
-        </p>
+        <h1>Suivi des copies</h1>
+        <p>Version test de l'appli</p>
       </header>
 
       <section className="cards">
         <article className="card">
-          <h2>Nouvel élève</h2>
-          <form onSubmit={handleCreateStudent} className="student-form">
-            <input
-              value={newStudentName}
-              onChange={(event) => setNewStudentName(event.target.value)}
-              placeholder="Nom de l'élève"
-            />
-            <input
-              value={newStudentClass}
-              onChange={(event) => setNewStudentClass(event.target.value)}
-              placeholder="Classe (optionnel)"
-            />
-            <button type="submit">Ajouter</button>
-          </form>
-        </article>
-
-        <article className="card">
           <h2>Élèves</h2>
           {loading ? <p>Chargement...</p> : null}
+          {!showNewStudentForm ? (
+            <button type="button" onClick={() => setShowNewStudentForm(true)}>
+              Ajouter un élève
+            </button>
+          ) : (
+            <form onSubmit={handleCreateStudent} className="student-form">
+              <input
+                value={newStudentName}
+                onChange={(event) => setNewStudentName(event.target.value)}
+                placeholder="Nom de l'élève"
+              />
+              <input
+                value={newStudentClass}
+                onChange={(event) => setNewStudentClass(event.target.value)}
+                placeholder="Classe (optionnel)"
+              />
+              <div className="actions-row">
+                <button type="submit">Enregistrer l'élève</button>
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => {
+                    setShowNewStudentForm(false);
+                    setNewStudentName("");
+                    setNewStudentClass("");
+                  }}
+                >
+                  Annuler
+                </button>
+              </div>
+            </form>
+          )}
+          {students.length ? (
+            <label className="stack-label">
+              Classe
+              <select value={selectedClass} onChange={(event) => setSelectedClass(event.target.value)}>
+                <option value="__ALL__">Toutes les classes</option>
+                {classOptions.map((className) => (
+                  <option value={className} key={className}>
+                    {className}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <div className="student-list">
-            {students.map((student) => (
+            {filteredStudents.map((student) => (
               <button
                 key={student.id}
                 className={student.id === selectedStudentId ? "student active" : "student"}
@@ -173,8 +302,53 @@ function App() {
                 </span>
               </button>
             ))}
-            {!students.length && !loading ? <p>Aucun élève pour le moment.</p> : null}
+            {!filteredStudents.length && !loading ? <p>Aucun élève pour ce filtre.</p> : null}
           </div>
+        </article>
+
+        <article className="card">
+          <h2>Ajouter une copie</h2>
+          <form onSubmit={handleUploadSubmission} className="student-form">
+            <select
+              value={selectedStudentId ?? ""}
+              onChange={(event) => setSelectedStudentId(Number(event.target.value) || null)}
+              disabled={uploading}
+            >
+              <option value="">Sélectionner un élève</option>
+              {filteredStudents.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.name}
+                </option>
+              ))}
+            </select>
+            <input
+              value={uploadTitle}
+              onChange={(event) => setUploadTitle(event.target.value)}
+              placeholder="Titre de la copie"
+              disabled={uploading}
+            />
+            <label className="file-picker">
+              Prendre/charger une photo
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                disabled={uploading}
+                onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+              />
+            </label>
+            {uploadFile ? <p>{uploadFile.name}</p> : null}
+            {uploading && uploadProgress !== null && uploadProgress < 100 ? (
+              <p>Téléversement de la copie: {uploadProgress}%</p>
+            ) : null}
+            {uploading && (uploadProgress === null || uploadProgress >= 100) ? (
+              <p>Téléversement terminé, traitement en cours...</p>
+            ) : null}
+            <button type="submit" className="upload-submit-btn" disabled={uploading || !selectedStudentId}>
+              {uploading ? "Traitement..." : "Prendre/Charger puis corriger"}
+            </button>
+          </form>
+          {uploadFeedback ? <p>{uploadFeedback}</p> : null}
         </article>
       </section>
 
@@ -185,7 +359,7 @@ function App() {
           {!detailsLoading && !evolution.length ? <p>Aucune copie encore.</p> : null}
           <div className="timeline">
             {evolution.map((item) => (
-              <div className="timeline-row" key={item.label}>
+              <div className="timeline-row" key={item.id}>
                 <span>{item.label}</span>
                 <div className="bar-wrapper">
                   <div
@@ -206,6 +380,10 @@ function App() {
             onChange={(event) => {
               const id = Number(event.target.value);
               setSelectedSubmission(submissions.find((item) => item.id === id) || null);
+              setShowRawText(false);
+              setShowCorrectedText(false);
+              setShowCopyImage(false);
+              setShowNoteDetails(false);
             }}
           >
             <option value="">Sélectionner une copie</option>
@@ -219,18 +397,47 @@ function App() {
           {selectedSubmission ? (
             <div className="submission-detail">
               <p>
-                <strong>Critère:</strong> Orthographe
+                <strong>Global:</strong> {selectedSubmission.score_orthography ?? "-"} /20
               </p>
-              <p>
-                <strong>Note attribuée:</strong> {selectedSubmission.score_orthography}/20
-              </p>
-              <p>
-                <strong>Fautes détectées:</strong> {selectedSubmission.mistakes_count}
-              </p>
-              <h3>Transcription</h3>
-              <pre>{selectedSubmission.text_raw || "Aucun texte reconnu."}</pre>
-              <h3>Texte corrigé</h3>
-              <pre>{selectedSubmission.text_corrected || "Aucune correction disponible."}</pre>
+              <button type="button" className="secondary-btn" onClick={() => setShowNoteDetails((value) => !value)}>
+                {showNoteDetails ? "Masquer détails note" : "Détails note"}
+              </button>
+              {showNoteDetails ? (
+                <div className="note-details-block">
+                  <p>
+                    <strong>Orthographe:</strong> {selectedSubmission.score_orthography ?? "-"} /20
+                  </p>
+                  <p>
+                    <strong>Fautes détectées:</strong> {selectedSubmission.mistakes_count ?? 0}
+                  </p>
+                </div>
+              ) : null}
+              <button type="button" onClick={() => setShowCopyImage((value) => !value)}>
+                {showCopyImage ? "Masquer la copie" : "Voir la copie"}
+              </button>
+              {showCopyImage ? (
+                getSubmissionImageUrl(selectedSubmission) ? (
+                  <div className="copy-gallery">
+                    <a href={getSubmissionImageUrl(selectedSubmission)} target="_blank" rel="noreferrer">
+                      <img src={getSubmissionImageUrl(selectedSubmission)} alt="Copie élève" loading="lazy" />
+                    </a>
+                  </div>
+                ) : (
+                  <p>Aucune photo trouvée pour cette copie.</p>
+                )
+              ) : null}
+              <button type="button" onClick={() => setShowRawText((value) => !value)}>
+                {showRawText ? "Masquer la transcription" : "Afficher la transcription"}
+              </button>
+              {showRawText ? (
+                <pre>{selectedSubmission.text_raw || "Aucun texte reconnu."}</pre>
+              ) : null}
+              <button type="button" onClick={() => setShowCorrectedText((value) => !value)}>
+                {showCorrectedText ? "Masquer le texte corrigé" : "Afficher le texte corrigé"}
+              </button>
+              {showCorrectedText ? (
+                <pre>{selectedSubmission.text_corrected || "Aucune correction disponible."}</pre>
+              ) : null}
             </div>
           ) : (
             <p>Sélectionner une copie pour voir les détails.</p>
