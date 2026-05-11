@@ -98,6 +98,14 @@ function normalizeWordForCompare(value) {
     .toLowerCase();
 }
 
+function isSentenceStart(text, offset) {
+  if (!offset || offset <= 0) return true;
+  const before = String(text || "").slice(0, offset).trimEnd();
+  if (!before) return true;
+  const lastChar = before[before.length - 1];
+  return /[.!?\n\r]/.test(lastChar);
+}
+
 function withTimeout(promise, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -199,7 +207,7 @@ function correctOrthography(rawText, spell) {
   let mistakes = 0;
   const suggestions = [];
 
-  const correctedText = rawText.replace(/\b[\p{L}’-]+\b/gu, (word) => {
+  const correctedText = rawText.replace(/\b[\p{L}’-]+\b/gu, (word, offset, fullText) => {
     const lower = word.toLowerCase();
     if (spell.correct(lower)) {
       return word;
@@ -219,8 +227,9 @@ function correctOrthography(rawText, spell) {
       return word;
     }
 
-    // Keep proper names untouched to avoid false positives (ex: "Taratonga" -> "Maratona").
-    if (/^[A-ZÀ-ÖØ-Ý][\p{L}’-]+$/u.test(word)) {
+    // Keep proper names untouched to avoid false positives (ex: "Taratonga" -> "Maratona"),
+    // except when the token is at sentence start where normal words are often capitalized.
+    if (/^[A-ZÀ-ÖØ-Ý][\p{L}’-]+$/u.test(word) && !isSentenceStart(fullText, offset)) {
       return word;
     }
 

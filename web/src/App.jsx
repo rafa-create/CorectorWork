@@ -337,9 +337,9 @@ function App() {
   const evolution = submissions
     .slice()
     .reverse()
-    .map((submission, index) => ({
+    .map((submission) => ({
       id: submission.id,
-      label: `Copie ${index + 1}`,
+      label: new Date(submission.created_at).toLocaleDateString("fr-FR"),
       score: Number(submission.score_orthography || 0),
     }));
 
@@ -611,7 +611,7 @@ function App() {
                     </g>
                   ))}
                 </svg>
-                <p className="graph-caption">Abscisse: copies - Ordonnée: note /20</p>
+                <p className="graph-caption">Abscisse: date - Ordonnée: note /20</p>
               </div>
             ) : null}
           </article>
