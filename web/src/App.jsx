@@ -25,6 +25,59 @@ function getSubmissionImageUrl(submission) {
   return `/uploads/${submission.image_path}`;
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function renderHighlightedPre(text, words, highlightClassName) {
+  const safeText = text || "";
+  const targets = [...new Set((words || []).filter(Boolean))];
+  if (!targets.length) {
+    return <pre>{safeText || "Aucun texte reconnu."}</pre>;
+  }
+
+  const pattern = targets.map((word) => escapeRegExp(word)).join("|");
+  if (!pattern) {
+    return <pre>{safeText || "Aucun texte reconnu."}</pre>;
+  }
+  const regex = new RegExp(`\\b(${pattern})\\b`, "giu");
+  const lines = safeText.split("\n");
+
+  return (
+    <pre>
+      {lines.map((line, lineIndex) => {
+        const parts = [];
+        let lastIndex = 0;
+        regex.lastIndex = 0;
+        let match = regex.exec(line);
+        while (match) {
+          const matchedText = match[0];
+          const index = match.index ?? 0;
+          if (index > lastIndex) {
+            parts.push(line.slice(lastIndex, index));
+          }
+          parts.push(
+            <span className={highlightClassName} key={`${lineIndex}-${index}-${matchedText}`}>
+              {matchedText}
+            </span>
+          );
+          lastIndex = index + matchedText.length;
+          match = regex.exec(line);
+        }
+        if (lastIndex < line.length) {
+          parts.push(line.slice(lastIndex));
+        }
+        return (
+          <span key={`line-${lineIndex}`}>
+            {parts}
+            {lineIndex < lines.length - 1 ? "\n" : null}
+          </span>
+        );
+      })}
+    </pre>
+  );
+}
+
 function App() {
   const [students, setStudents] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState(null);
@@ -250,6 +303,22 @@ function App() {
   });
 
   const polylinePoints = graphPoints.map((point) => `${point.x},${point.y}`).join(" ");
+  const spellingDetails = useMemo(() => {
+    const suggestions = selectedSubmission?.spelling_suggestions || [];
+    const grouped = new Map();
+    for (const item of suggestions) {
+      const original = String(item?.original || "").trim();
+      const corrected = String(item?.corrected || "").trim();
+      if (!original || !corrected) continue;
+      const key = `${original}__${corrected}`;
+      const existing = grouped.get(key) || { original, corrected, count: 0 };
+      existing.count += 1;
+      grouped.set(key, existing);
+    }
+    return [...grouped.values()].sort((a, b) => b.count - a.count);
+  }, [selectedSubmission]);
+  const rawHighlightWords = spellingDetails.map((item) => item.original);
+  const correctedHighlightWords = spellingDetails.map((item) => item.corrected);
 
   return (
     <main className="layout">
@@ -500,6 +569,17 @@ function App() {
                   <p>
                     <strong>Fautes détectées:</strong> {selectedSubmission.mistakes_count ?? 0}
                   </p>
+                  {spellingDetails.length ? (
+                    <ul className="details-list">
+                      {spellingDetails.map((item) => (
+                        <li key={`${item.original}-${item.corrected}`}>
+                          <strong>{item.original}</strong> {"->"} <strong>{item.corrected}</strong> ({item.count}x)
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>Aucun détail de correction disponible pour cette copie.</p>
+                  )}
                 </div>
               ) : null}
               <button type="button" onClick={() => setShowCopyImage((value) => !value)}>
@@ -520,13 +600,17 @@ function App() {
                 {showRawText ? "Masquer la transcription" : "Afficher la transcription"}
               </button>
               {showRawText ? (
-                <pre>{selectedSubmission.text_raw || "Aucun texte reconnu."}</pre>
+                renderHighlightedPre(selectedSubmission.text_raw, rawHighlightWords, "text-error-highlight")
               ) : null}
               <button type="button" onClick={() => setShowCorrectedText((value) => !value)}>
                 {showCorrectedText ? "Masquer le texte corrigé" : "Afficher le texte corrigé"}
               </button>
               {showCorrectedText ? (
-                <pre>{selectedSubmission.text_corrected || "Aucune correction disponible."}</pre>
+                renderHighlightedPre(
+                  selectedSubmission.text_corrected || "Aucune correction disponible.",
+                  correctedHighlightWords,
+                  "text-corrected-highlight"
+                )
               ) : null}
             </div>
           ) : (

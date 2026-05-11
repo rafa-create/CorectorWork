@@ -230,6 +230,13 @@ button {
   padding: 10px;
 }
 
+.details-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
 .copy-gallery {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -246,6 +253,20 @@ button {
   border: 1px solid #d9e0eb;
   border-radius: 8px;
   background: #f8faff;
+}
+
+.text-error-highlight {
+  background: #ffe0e0;
+  color: #8a1111;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.text-corrected-highlight {
+  background: #ddf7e5;
+  color: #176636;
+  border-radius: 3px;
+  padding: 0 2px;
 }
 
 .error {

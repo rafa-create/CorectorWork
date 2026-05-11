@@ -335,6 +335,7 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
       text_corrected: orthography.correctedText,
       mistakes_count: orthography.mistakes,
       score_orthography: orthography.orthographyScore,
+      spelling_suggestions: orthography.suggestions,
       criteria,
       created_at: nowIso(),
     };
@@ -344,7 +345,6 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
     res.status(201).json({
       ...created,
       criteria,
-      spelling_suggestions: orthography.suggestions,
       image_url: `/uploads/${created.image_path}`,
     });
   } catch (error) {
