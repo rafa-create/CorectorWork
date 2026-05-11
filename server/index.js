@@ -10,6 +10,12 @@ const PORT = Number(process.env.PORT || 4000);
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const OCR_MAX_CONCURRENT = 1;
 const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 90000);
+const OCR_PROVIDER_PRIORITY = String(process.env.OCR_PROVIDER_PRIORITY || "ocrspace_first").toLowerCase();
+const OCR_SPACE_API_URL = String(process.env.OCR_SPACE_API_URL || "https://api.ocr.space/parse/image");
+const OCR_SPACE_API_KEY = String(process.env.OCR_SPACE_API_KEY || "helloworld");
+const OCR_SPACE_LANGUAGE = String(process.env.OCR_SPACE_LANGUAGE || "fre");
+const OCR_SPACE_ENGINE = String(process.env.OCR_SPACE_ENGINE || "2");
+const OCR_SPACE_TIMEOUT_MS = Number(process.env.OCR_SPACE_TIMEOUT_MS || 45000);
 
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 const DATA_PATH = path.join(__dirname, "data", "store.json");
@@ -142,7 +148,7 @@ async function getSpellChecker(appRef) {
   return appRef.locals.spellPromise;
 }
 
-async function runOcr(imagePath) {
+async function runOcrWithLocalWorker(imagePath) {
   const workerScript = path.join(__dirname, "ocr-worker.js");
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [workerScript, imagePath], {
@@ -203,6 +209,62 @@ async function runOcr(imagePath) {
   });
 }
 
+async function runOcrWithOcrSpace(imagePath) {
+  const imageBuffer = fs.readFileSync(imagePath);
+  const formData = new FormData();
+  formData.append("apikey", OCR_SPACE_API_KEY);
+  formData.append("language", OCR_SPACE_LANGUAGE);
+  formData.append("OCREngine", OCR_SPACE_ENGINE);
+  formData.append("file", new Blob([imageBuffer]), path.basename(imagePath));
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OCR_SPACE_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(OCR_SPACE_API_URL, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`OCR.space HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    if (payload?.IsErroredOnProcessing) {
+      throw new Error(`OCR.space processing error: ${payload?.ErrorMessage || payload?.ErrorDetails || "unknown"}`);
+    }
+    const parsedText = Array.isArray(payload?.ParsedResults)
+      ? payload.ParsedResults.map((item) => String(item?.ParsedText || "")).join("\n")
+      : "";
+    const normalized = parsedText.trim();
+    if (!normalized) {
+      throw new Error("OCR.space returned empty text");
+    }
+    return normalized;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error(`OCR.space timeout after ${OCR_SPACE_TIMEOUT_MS}ms`);
+      timeoutError.code = "OCR_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function runOcr(imagePath) {
+  if (OCR_PROVIDER_PRIORITY === "local_first") {
+    return runOcrWithLocalWorker(imagePath);
+  }
+  try {
+    return await runOcrWithOcrSpace(imagePath);
+  } catch (error) {
+    console.warn("OCR.space indisponible, fallback local:", String(error?.message || error));
+    return runOcrWithLocalWorker(imagePath);
+  }
+}
+
 function correctOrthography(rawText, spell) {
   let mistakes = 0;
   const suggestions = [];
@@ -253,6 +315,7 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     ocr_in_progress: Number(app.locals.ocrInProgress || 0),
     ocr_max_concurrent: OCR_MAX_CONCURRENT,
+    ocr_provider_priority: OCR_PROVIDER_PRIORITY,
   });
 });
 
