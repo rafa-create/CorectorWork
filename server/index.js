@@ -1,9 +1,9 @@
 const path = require("path");
 const fs = require("fs");
+const { fork } = require("child_process");
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
-const { createWorker } = require("tesseract.js");
 const NSpell = require("nspell");
 
 const PORT = Number(process.env.PORT || 4000);
@@ -128,22 +128,52 @@ async function getSpellChecker(appRef) {
 }
 
 async function runOcr(imagePath) {
-  const worker = await createWorker("fra");
-  let timeoutId = null;
-  try {
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
-        const timeoutError = new Error(`OCR timeout after ${OCR_TIMEOUT_MS}ms`);
-        timeoutError.code = "OCR_TIMEOUT";
-        reject(timeoutError);
-      }, OCR_TIMEOUT_MS);
+  const workerScript = path.join(__dirname, "ocr-worker.js");
+  return new Promise((resolve, reject) => {
+    const child = fork(workerScript, [], {
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
-    const result = await Promise.race([worker.recognize(imagePath), timeoutPromise]);
-    return (result.data.text || "").trim();
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-    await worker.terminate();
-  }
+    let settled = false;
+
+    const finish = (error, text) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      child.removeAllListeners();
+      if (error) {
+        reject(error);
+      } else {
+        resolve(text || "");
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      const timeoutError = new Error(`OCR timeout after ${OCR_TIMEOUT_MS}ms`);
+      timeoutError.code = "OCR_TIMEOUT";
+      if (!child.killed) child.kill("SIGKILL");
+      finish(timeoutError);
+    }, OCR_TIMEOUT_MS);
+
+    child.on("message", (message) => {
+      if (!message || message.type !== "result") return;
+      if (message.ok) {
+        finish(null, String(message.text || "").trim());
+      } else {
+        finish(new Error(message.error || "OCR worker failed"));
+      }
+    });
+
+    child.on("error", (error) => {
+      finish(error);
+    });
+
+    child.on("exit", (code, signal) => {
+      if (settled) return;
+      finish(new Error(`OCR worker exited unexpectedly (code=${code}, signal=${signal || "none"})`));
+    });
+
+    child.send({ type: "ocr", imagePath });
+  });
 }
 
 function correctOrthography(rawText, spell) {
