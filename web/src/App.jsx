@@ -328,11 +328,20 @@ function App() {
               disabled={uploading}
             />
             <label className="file-picker">
-              Prendre/charger une photo
+              Prendre une photo (caméra)
               <input
                 type="file"
                 accept="image/*"
                 capture="environment"
+                disabled={uploading}
+                onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+              />
+            </label>
+            <label className="file-picker">
+              Charger depuis le téléphone (galerie)
+              <input
+                type="file"
+                accept="image/*"
                 disabled={uploading}
                 onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
               />
