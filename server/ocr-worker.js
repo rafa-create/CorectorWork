@@ -10,22 +10,26 @@ async function runOcr(imagePath) {
   }
 }
 
-process.on("message", async (message) => {
-  if (!message || message.type !== "ocr") return;
+async function runFromCli() {
+  const imagePath = process.argv[2];
+  if (!imagePath) {
+    process.stderr.write("Missing image path\n");
+    process.exit(2);
+    return;
+  }
   try {
-    const text = await runOcr(message.imagePath);
-    if (process.send) {
-      process.send({ type: "result", ok: true, text });
-    }
+    const text = await runOcr(imagePath);
+    process.stdout.write(JSON.stringify({ ok: true, text }));
+    process.exit(0);
   } catch (error) {
-    if (process.send) {
-      process.send({
-        type: "result",
+    process.stdout.write(
+      JSON.stringify({
         ok: false,
         error: String(error?.message || error),
-      });
-    }
-  } finally {
-    process.exit(0);
+      })
+    );
+    process.exit(1);
   }
-});
+}
+
+runFromCli();

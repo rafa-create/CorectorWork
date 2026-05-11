@@ -1,6 +1,6 @@
 const path = require("path");
 const fs = require("fs");
-const { fork } = require("child_process");
+const { spawn } = require("child_process");
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -130,10 +130,12 @@ async function getSpellChecker(appRef) {
 async function runOcr(imagePath) {
   const workerScript = path.join(__dirname, "ocr-worker.js");
   return new Promise((resolve, reject) => {
-    const child = fork(workerScript, [], {
-      stdio: ["ignore", "ignore", "ignore", "ipc"],
+    const child = spawn(process.execPath, [workerScript, imagePath], {
+      stdio: ["ignore", "pipe", "pipe"],
     });
     let settled = false;
+    let stdout = "";
+    let stderr = "";
 
     const finish = (error, text) => {
       if (settled) return;
@@ -154,13 +156,12 @@ async function runOcr(imagePath) {
       finish(timeoutError);
     }, OCR_TIMEOUT_MS);
 
-    child.on("message", (message) => {
-      if (!message || message.type !== "result") return;
-      if (message.ok) {
-        finish(null, String(message.text || "").trim());
-      } else {
-        finish(new Error(message.error || "OCR worker failed"));
-      }
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
     });
 
     child.on("error", (error) => {
@@ -169,10 +170,21 @@ async function runOcr(imagePath) {
 
     child.on("exit", (code, signal) => {
       if (settled) return;
-      finish(new Error(`OCR worker exited unexpectedly (code=${code}, signal=${signal || "none"})`));
+      try {
+        const parsed = JSON.parse(stdout || "{}");
+        if (parsed.ok) {
+          finish(null, String(parsed.text || "").trim());
+          return;
+        }
+        finish(new Error(parsed.error || stderr || "OCR worker failed"));
+      } catch (_error) {
+        finish(
+          new Error(
+            `OCR worker exited unexpectedly (code=${code}, signal=${signal || "none"}): ${stderr || stdout || "no output"}`
+          )
+        );
+      }
     });
-
-    child.send({ type: "ocr", imagePath });
   });
 }
 
