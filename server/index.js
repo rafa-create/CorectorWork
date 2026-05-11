@@ -98,6 +98,24 @@ function withTimeout(promise, timeoutMs) {
   });
 }
 
+async function getSpellChecker(appRef) {
+  if (appRef.locals.spellInstance) {
+    return appRef.locals.spellInstance;
+  }
+  if (!appRef.locals.spellPromise) {
+    appRef.locals.spellPromise = withTimeout(loadFrenchSpell(), 15000)
+      .then((spell) => {
+        appRef.locals.spellInstance = spell;
+        return spell;
+      })
+      .catch((error) => {
+        appRef.locals.spellPromise = null;
+        throw error;
+      });
+  }
+  return appRef.locals.spellPromise;
+}
+
 async function runOcr(imagePath) {
   const worker = await createWorker("fra");
   try {
@@ -252,7 +270,12 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
   const imagePath = image.path;
   try {
     const rawText = await runOcr(imagePath);
-    const spell = await app.locals.spellPromise;
+    let spell = null;
+    try {
+      spell = await getSpellChecker(app);
+    } catch (error) {
+      console.warn("Dictionnaire indisponible:", String(error?.message || error));
+    }
     const orthography = spell
       ? correctOrthography(rawText, spell)
       : {
@@ -299,8 +322,8 @@ app.post("/api/submissions", upload.single("image"), async (req, res) => {
 });
 
 async function start() {
-  // Disable eager spell initialization in production to avoid blocking startup.
-  app.locals.spellPromise = Promise.resolve(null);
+  app.locals.spellPromise = null;
+  app.locals.spellInstance = null;
 
   app.listen(PORT, () => {
     console.log(`API Corector démarrée sur http://localhost:${PORT}`);
