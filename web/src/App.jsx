@@ -47,6 +47,7 @@ function App() {
   const [showCorrectedText, setShowCorrectedText] = useState(false);
   const [showCopyImage, setShowCopyImage] = useState(false);
   const [showNoteDetails, setShowNoteDetails] = useState(false);
+  const [evolutionView, setEvolutionView] = useState("graph");
 
   const selectedStudent = useMemo(
     () => students.find((student) => student.id === selectedStudentId) || null,
@@ -232,6 +233,23 @@ function App() {
       score: Number(submission.score_orthography || 0),
     }));
 
+  const graphWidth = 640;
+  const graphHeight = 280;
+  const margin = { top: 20, right: 24, bottom: 42, left: 38 };
+  const innerWidth = graphWidth - margin.left - margin.right;
+  const innerHeight = graphHeight - margin.top - margin.bottom;
+
+  const graphPoints = evolution.map((item, index) => {
+    const x =
+      evolution.length <= 1
+        ? margin.left + innerWidth / 2
+        : margin.left + (index / (evolution.length - 1)) * innerWidth;
+    const y = margin.top + ((20 - item.score) / 20) * innerHeight;
+    return { ...item, x, y };
+  });
+
+  const polylinePoints = graphPoints.map((point) => `${point.x},${point.y}`).join(" ");
+
   return (
     <main className="layout">
       <header>
@@ -364,22 +382,77 @@ function App() {
       <section className="cards">
         <article className="card">
           <h2>Évolution de {selectedStudent?.name || "..."}</h2>
+          <div className="actions-row">
+            <button
+              type="button"
+              className={evolutionView === "bars" ? "view-btn active" : "view-btn"}
+              onClick={() => setEvolutionView("bars")}
+            >
+              Vue liste
+            </button>
+            <button
+              type="button"
+              className={evolutionView === "graph" ? "view-btn active" : "view-btn"}
+              onClick={() => setEvolutionView("graph")}
+            >
+              Vue graphique
+            </button>
+          </div>
           {detailsLoading ? <p>Chargement des copies...</p> : null}
           {!detailsLoading && !evolution.length ? <p>Aucune copie encore.</p> : null}
-          <div className="timeline">
-            {evolution.map((item) => (
-              <div className="timeline-row" key={item.id}>
-                <span>{item.label}</span>
-                <div className="bar-wrapper">
-                  <div
-                    className={`bar ${scoreClass(item.score)}`}
-                    style={{ width: `${Math.max(4, (item.score / 20) * 100)}%` }}
-                  />
+          {evolutionView === "bars" ? (
+            <div className="timeline">
+              {evolution.map((item) => (
+                <div className="timeline-row" key={item.id}>
+                  <span>{item.label}</span>
+                  <div className="bar-wrapper">
+                    <div
+                      className={`bar ${scoreClass(item.score)}`}
+                      style={{ width: `${Math.max(4, (item.score / 20) * 100)}%` }}
+                    />
+                  </div>
+                  <strong>{item.score}/20</strong>
                 </div>
-                <strong>{item.score}/20</strong>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : null}
+          {evolutionView === "graph" && evolution.length ? (
+            <div className="graph-wrap">
+              <svg viewBox={`0 0 ${graphWidth} ${graphHeight}`} className="evolution-graph">
+                {[0, 5, 10, 15, 20].map((tick) => {
+                  const y = margin.top + ((20 - tick) / 20) * innerHeight;
+                  return (
+                    <g key={tick}>
+                      <line
+                        x1={margin.left}
+                        y1={y}
+                        x2={graphWidth - margin.right}
+                        y2={y}
+                        className="graph-grid"
+                      />
+                      <text x={6} y={y + 4} className="graph-label">
+                        {tick}
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {graphPoints.length > 1 ? (
+                  <polyline fill="none" points={polylinePoints} className="graph-line" />
+                ) : null}
+
+                {graphPoints.map((point) => (
+                  <g key={point.id}>
+                    <circle cx={point.x} cy={point.y} r="4" className="graph-point" />
+                    <text x={point.x} y={graphHeight - 10} textAnchor="middle" className="graph-label">
+                      {point.label}
+                    </text>
+                  </g>
+                ))}
+              </svg>
+              <p className="graph-caption">Abscisse: copies - Ordonnée: note /20</p>
+            </div>
+          ) : null}
         </article>
 
         <article className="card">

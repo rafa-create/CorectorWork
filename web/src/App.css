@@ -91,6 +91,16 @@ button {
   gap: 8px;
 }
 
+.view-btn {
+  background: #e5edf9;
+  color: #1e2f53;
+}
+
+.view-btn.active {
+  background: #23458f;
+  color: #fff;
+}
+
 .student {
   text-align: left;
   background: #f7f8fb;
@@ -126,6 +136,43 @@ button {
 .timeline {
   display: grid;
   gap: 8px;
+}
+
+.graph-wrap {
+  margin-top: 8px;
+}
+
+.evolution-graph {
+  width: 100%;
+  height: auto;
+  border: 1px solid #d9e2f0;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+
+.graph-grid {
+  stroke: #d9e2f0;
+  stroke-width: 1;
+}
+
+.graph-line {
+  stroke: #23458f;
+  stroke-width: 2.2;
+}
+
+.graph-point {
+  fill: #23458f;
+}
+
+.graph-label {
+  font-size: 10px;
+  fill: #445575;
+}
+
+.graph-caption {
+  margin-top: 8px;
+  color: #4f5b6f;
+  font-size: 13px;
 }
 
 .timeline-row {
